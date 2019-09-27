@@ -113,10 +113,10 @@ namespace Downloader_Bot
 
                                 if (size < _config.MaxFileSize)//Send the file directly
                                 {
-                                    using (FileStream fs = File.OpenRead(_downloadPath))
+                                    using (FileStream fs = File.OpenRead(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text))))
                                     {
                                         InputOnlineFile inputOnlineFile =
-                                            new InputOnlineFile(fs, Path.GetFileName(_downloadPath));
+                                            new InputOnlineFile(fs, Path.GetFileName(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text))));
                                         await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile);
                                     }
                                 }
