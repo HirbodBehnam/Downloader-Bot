@@ -1,5 +1,4 @@
 ﻿using Newtonsoft.Json;
-
 using System;
 using System.IO;
 using System.Net;
@@ -19,13 +18,15 @@ namespace Downloader_Bot
         public int[] Admins;
         public long MaxFileSize;
     }
+
     class Program
     {
-        private const int MaxFileSize = 1024 * 1024 * 50;
+        private const int MaxFileSize = 1024 * 1024 * 47;
         private static ConfigStruct _config;
         private static TelegramBotClient _bot;
         private static string _downloadPath;
         private static bool _freeBot;
+
         static void Main(string[] args)
         {
             //Load the config file
@@ -64,51 +65,63 @@ namespace Downloader_Bot
                     case "/start":
                         break;
                     case "/id":
-                        await _bot.SendTextMessageAsync(e.Message.Chat,e.Message.Chat.Id.ToString());
+                        await _bot.SendTextMessageAsync(e.Message.Chat, e.Message.Chat.Id.ToString());
                         break;
                     default:
                         if (!_freeBot && !Array.Exists(_config.Admins, id => id == e.Message.From.Id))
-                            Log("Unauthorized access from user " + e.Message.From.FirstName + " " + e.Message.From.LastName + "; ID: "+ e.Message.From.Id);
+                            Log("Unauthorized access from user " + e.Message.From.FirstName + " " +
+                                e.Message.From.LastName + "; ID: " + e.Message.From.Id);
                         else
                         {
                             //At first check if the url is valid
-                                if (!ValidateUrl(e.Message.Text))
+                            if (!ValidateUrl(e.Message.Text))
+                            {
+                                await _bot.SendTextMessageAsync(e.Message.Chat, "The URL is not valid.");
+                                return;
+                            }
+
+                            //Then check the file size; If it is less than 20MB use telegram itself
+                            long size = GetSizeOfFile(e.Message.Text);
+                            if (size < 1) //Either an error or file size is really 0
+                            {
+                                await _bot.SendTextMessageAsync(e.Message.Chat,
+                                    "Error on getting file size or the file size is 0");
+                            }
+                            else if (size < _config.MaxFileSize) //Download the file, zip it and send it
+                            {
+                                var msg = await _bot.SendTextMessageAsync(e.Message.Chat,
+                                    "Downloading the file on server");
+                                string dir = new Random().Next().ToString();
+                                var d = Directory.CreateDirectory(Path.Combine(_downloadPath, dir));
+                                try
                                 {
-                                    await _bot.SendTextMessageAsync(e.Message.Chat, "The URL is not valid.");
+                                    //At first download the whole file
+                                    using (WebClient wc = new WebClient())
+                                    {
+                                        wc.DownloadFile(e.Message.Text,
+                                            Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
+                                    }
+                                }
+                                catch (Exception)
+                                {
+                                    Log("Error downloading " + e.Message.Text);
+                                    await _bot.SendTextMessageAsync(e.Message.Chat,
+                                        "Error downloading " + e.Message.Text);
+                                    await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
                                     return;
                                 }
 
-                                //Then check the file size; If it is less than 20MB use telegram itself
-                                long size = GetSizeOfFile(e.Message.Text);
-                                if (size < 1) //Either an error or file size is really 0
+                                if (size < _config.MaxFileSize)//Send the file directly
                                 {
-                                    await _bot.SendTextMessageAsync(e.Message.Chat,
-                                        "Error on getting file size or the file size is 0");
+                                    using (FileStream fs = File.OpenRead(_downloadPath))
+                                    {
+                                        InputOnlineFile inputOnlineFile =
+                                            new InputOnlineFile(fs, Path.GetFileName(_downloadPath));
+                                        await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile);
+                                    }
                                 }
-                                else if (size < _config.MaxFileSize) //Download the file, zip it and send it
+                                else
                                 {
-                                    var msg = await _bot.SendTextMessageAsync(e.Message.Chat,
-                                        "Downloading the file on server");
-                                    string dir = new Random().Next().ToString();
-                                    var d = Directory.CreateDirectory(Path.Combine(_downloadPath, dir));
-                                    try
-                                    {
-                                        //At first download the whole file
-                                        using (WebClient wc = new WebClient())
-                                        {
-                                            wc.DownloadFile(e.Message.Text,
-                                                Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
-                                        }
-                                    }
-                                    catch (Exception)
-                                    {
-                                        Log("Error downloading " + e.Message.Text);
-                                        await _bot.SendTextMessageAsync(e.Message.Chat,
-                                            "Error downloading " + e.Message.Text);
-                                        await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
-                                        return;
-                                    }
-
                                     //Then zip the file
                                     await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, "Zipping file");
                                     using (ZipFile zip = new ZipFile())
@@ -136,20 +149,22 @@ namespace Downloader_Bot
                                         }
                                     }
 
-                                    await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
-                                    d.Delete(true);
                                 }
-                                else
-                                {
-                                    await _bot.SendTextMessageAsync(e.Message.Chat,
-                                        "File is too large for bot! (" + size + ")");
-                                }
-                            
+                                await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
+                                d.Delete(true);
+                            }
+                            else
+                            {
+                                await _bot.SendTextMessageAsync(e.Message.Chat,
+                                    "File is too large for bot! (" + size + ")");
+                            }
                         }
+
                         break;
                 }
             }
         }
+
         /// <summary>
         /// Gets the size of remote file without downloading it. https://stackoverflow.com/a/12079865/4213397
         /// </summary>
@@ -169,8 +184,10 @@ namespace Downloader_Bot
             {
                 // ignored
             }
+
             return -1;
         }
+
         /// <summary>
         /// Checks whether the url is valid or not
         /// </summary>
@@ -178,9 +195,10 @@ namespace Downloader_Bot
         /// <returns>True if valid</returns>
         private static bool ValidateUrl(string url)
         {
-            return Uri.TryCreate(url, UriKind.Absolute, out var uriResult) 
-                && (uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps);
+            return Uri.TryCreate(url, UriKind.Absolute, out var uriResult)
+                   && (uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps);
         }
+
         /// <summary>
         /// Logs a message to terminal with time
         /// </summary>
@@ -189,6 +207,7 @@ namespace Downloader_Bot
         {
             Console.WriteLine($"[{DateTime.Now:G}]: {m}");
         }
+
         /// <summary>
         /// Get file name from URL
         /// </summary>
