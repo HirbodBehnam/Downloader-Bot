@@ -1,6 +1,7 @@
 ﻿using Newtonsoft.Json;
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Threading;
 using Ionic.Zip;
@@ -11,7 +12,7 @@ namespace Downloader_Bot
 {
     //dotnet add package DotNetZip --version 1.13.4
     //dotnet add package Telegram.Bot --version 15.0.0
-    class ConfigStruct
+    internal class ConfigStruct
     {
         public string Token;
         public string DownloadPath;
@@ -21,7 +22,7 @@ namespace Downloader_Bot
 
     class Program
     {
-        private const int MaxFileSize = 1024 * 1024 * 47;
+        private const int MaxFileSize = 1024 * 1024 * 47,MaxTelegramSize = 20 * 1000 * 1000;
         private static ConfigStruct _config;
         private static TelegramBotClient _bot;
         private static string _downloadPath;
@@ -63,9 +64,10 @@ namespace Downloader_Bot
                 switch (e.Message.Text)
                 {
                     case "/start":
+                        await _bot.SendTextMessageAsync(e.Message.Chat, "Welcome!\nJust send the link to the bot.");
                         break;
                     case "/id":
-                        await _bot.SendTextMessageAsync(e.Message.Chat, e.Message.Chat.Id.ToString());
+                        await _bot.SendTextMessageAsync(e.Message.Chat, e.Message.From.Id.ToString());
                         break;
                     default:
                         if (!_freeBot && !Array.Exists(_config.Admins, id => id == e.Message.From.Id))
@@ -86,6 +88,11 @@ namespace Downloader_Bot
                             {
                                 await _bot.SendTextMessageAsync(e.Message.Chat,
                                     "Error on getting file size or the file size is 0");
+                            }
+                            else if (size < MaxTelegramSize && CheckExtenstion(GetFileNameFromUrl(e.Message.Text)))
+                            {
+                                InputOnlineFile inputOnlineFile = new InputOnlineFile(e.Message.Text);
+                                await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile);
                             }
                             else if (size < _config.MaxFileSize) //Download the file, zip it and send it
                             {
@@ -111,7 +118,7 @@ namespace Downloader_Bot
                                     return;
                                 }
 
-                                if (size < _config.MaxFileSize)//Send the file directly
+                                if (size < _config.MaxFileSize) //Send the file directly
                                 {
                                     using (FileStream fs = File.OpenRead(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text))))
                                     {
@@ -156,7 +163,7 @@ namespace Downloader_Bot
                             else
                             {
                                 await _bot.SendTextMessageAsync(e.Message.Chat,
-                                    "File is too large for bot! (" + size + ")");
+                                    "File is too large for bot! (file size is " + size + " bytes)");
                             }
                         }
 
@@ -218,6 +225,16 @@ namespace Downloader_Bot
             string[] parts1 = url.Split('/');
             string[] parts2 = parts1[parts1.Length - 1].Split('?');
             return parts2[0];
+        }
+        /// <summary>
+        /// Checks if the extenstion of the file is supported by telegram for direct upload
+        /// </summary>
+        /// <param name="name">The file name</param>
+        /// <returns></returns>
+        private static bool CheckExtenstion(string name)
+        {
+            string[] extensions = {".zip",".pdf",".gif",".mp3",".ogg",".jpg",".png",".mp4"};
+            return extensions.Contains(Path.GetExtension(name));
         }
     }
 }
