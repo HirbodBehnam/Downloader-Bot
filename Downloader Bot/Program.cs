@@ -22,7 +22,7 @@ namespace Downloader_Bot
 
     class Program
     {
-        private const int MaxFileSize = 1024 * 1024 * 47,MaxTelegramSize = 20 * 1000 * 1000;
+        private const int MaxFileSize = 1000 * 1000 * 50,MaxTelegramSize = 20 * 1000 * 1000; //For some reasons, looks like there is some problems with 1024 * 1024 * 50 
         private static ConfigStruct _config;
         private static TelegramBotClient _bot;
         private static string _downloadPath;
@@ -109,9 +109,9 @@ namespace Downloader_Bot
                                             Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
                                     }
                                 }
-                                catch (Exception)
+                                catch (Exception ex)
                                 {
-                                    Log("Error downloading " + e.Message.Text);
+                                    Log("Error downloading " + e.Message.Text + ": " + ex.Message);
                                     await _bot.SendTextMessageAsync(e.Message.Chat,
                                         "Error downloading " + e.Message.Text);
                                     await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
