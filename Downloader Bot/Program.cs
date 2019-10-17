@@ -118,7 +118,7 @@ namespace Downloader_Bot
                                     return;
                                 }
 
-                                if (size < _config.MaxFileSize) //Send the file directly
+                                if (size < MaxTelegramSize) //Send the file directly
                                 {
                                     using (FileStream fs = File.OpenRead(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text))))
                                     {
