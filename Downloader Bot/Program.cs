@@ -23,6 +23,7 @@ namespace Downloader_Bot
     class Program
     {
         private const int MaxFileSize = 1000 * 1000 * 50,MaxTelegramSize = 20 * 1000 * 1000; //For some reasons, looks like there is some problems with 1024 * 1024 * 50 
+        private const string Version = "1.0.0";
         private static ConfigStruct _config;
         private static TelegramBotClient _bot;
         private static string _downloadPath;
@@ -30,6 +31,7 @@ namespace Downloader_Bot
 
         static void Main(string[] args)
         {
+            Console.WriteLine("Downloader Bot Version " + Version);
             //Load the config file
             try
             {
@@ -91,10 +93,18 @@ namespace Downloader_Bot
                             }
                             else if (size < MaxTelegramSize && CheckExtenstion(GetFileNameFromUrl(e.Message.Text)))
                             {
-                                InputOnlineFile inputOnlineFile = new InputOnlineFile(e.Message.Text);
-                                await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile);
+                                try
+                                {
+                                    InputOnlineFile inputOnlineFile = new InputOnlineFile(e.Message.Text);
+                                    await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile);
+                                    break;
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log("Error: Cannot download directly from Telegram:" + ex.Message);
+                                }
                             }
-                            else if (size < _config.MaxFileSize) //Download the file, zip it and send it
+                            if (size < _config.MaxFileSize) //Download the file, zip it and send it
                             {
                                 var msg = await _bot.SendTextMessageAsync(e.Message.Chat,
                                     "Downloading the file on server");
