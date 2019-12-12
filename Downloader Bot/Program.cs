@@ -1,9 +1,11 @@
 ﻿using Newtonsoft.Json;
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Threading;
+using System.Threading.Tasks;
 using Ionic.Zip;
 using Telegram.Bot;
 using Telegram.Bot.Types.InputFiles;
@@ -23,7 +25,7 @@ namespace Downloader_Bot
     class Program
     {
         private const int MaxFileSize = 1000 * 1000 * 50,MaxTelegramSize = 20 * 1000 * 1000; //For some reasons, looks like there is some problems with 1024 * 1024 * 50 
-        private const string Version = "1.0.0";
+        private const string Version = "1.0.1";
         private static ConfigStruct _config;
         private static TelegramBotClient _bot;
         private static string _downloadPath;
@@ -90,8 +92,9 @@ namespace Downloader_Bot
                             {
                                 await _bot.SendTextMessageAsync(e.Message.Chat,
                                     "Error on getting file size or the file size is 0");
+                                return;
                             }
-                            else if (size < MaxTelegramSize && CheckExtenstion(GetFileNameFromUrl(e.Message.Text)))
+                            if (size < MaxTelegramSize && CheckExtenstion(GetFileNameFromUrl(e.Message.Text)))
                             {
                                 try
                                 {
@@ -112,11 +115,37 @@ namespace Downloader_Bot
                                 var d = Directory.CreateDirectory(Path.Combine(_downloadPath, dir));
                                 try
                                 {
+                                    int percent = 0;
+                                    long toDownload = 1,downloaded = 0,lastTimeDownloaded = 0;
+                                    string lastMsg = ""; //Do not edit the message and send exactly the same thing
                                     //At first download the whole file
-                                    using (WebClient wc = new WebClient())
+                                    WebClient wc = new WebClient();
+                                    wc.DownloadProgressChanged += (o, args) =>
                                     {
-                                        wc.DownloadFile(e.Message.Text,
+                                        percent = args.ProgressPercentage;
+                                        toDownload = args.TotalBytesToReceive;
+                                        downloaded = args.BytesReceived;
+                                    };
+                                    wc.DownloadFileAsync(new Uri(e.Message.Text),
                                             Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
+                                    while (wc.IsBusy)
+                                    {
+                                        string m = percent + "% Completed.\n" + BytesToString(downloaded) + " from " +
+                                                   BytesToString(toDownload) + "  " + BytesToString(downloaded - lastTimeDownloaded) + "/s"; //Do not edit the message and send exactly the same thing
+                                        if (m != lastMsg)
+                                        {
+                                            lastMsg = m;
+                                            m += "\n[";
+                                            for (int i = 0; i < percent / 10; i++)
+                                                m += "#";
+                                            for (int i = 0; i < 10 - percent / 10; i++)
+                                                m += "⠀"; //This is not space
+                                            m += "]";
+                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,m);
+                                        }
+
+                                        lastTimeDownloaded = downloaded;
+                                        await Task.Delay(1000);
                                     }
                                 }
                                 catch (Exception ex)
@@ -245,6 +274,21 @@ namespace Downloader_Bot
         {
             string[] extensions = {".zip",".pdf",".gif",".mp3",".ogg",".jpg",".png",".mp4"};
             return extensions.Contains(Path.GetExtension(name));
+        }
+        /// <summary>
+        /// Converts byte to human readable amount https://stackoverflow.com/a/4975942/4213397
+        /// </summary>
+        /// <param name="byteCount"></param>
+        /// <returns></returns>
+        private static string BytesToString(long byteCount)
+        {
+            string[] suf = { "B", "KB", "MB", "GB", "TB", "PB", "EB" }; //Longs run out around EB
+            if (byteCount == 0)
+                return "0" + suf[0];
+            long bytes = Math.Abs(byteCount);
+            int place = Convert.ToInt32(Math.Floor(Math.Log(bytes, 1024)));
+            double num = Math.Round(bytes / Math.Pow(1024, place), 1);
+            return (Math.Sign(byteCount) * num).ToString(CultureInfo.InvariantCulture) + suf[place];
         }
     }
 }
