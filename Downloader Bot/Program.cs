@@ -87,7 +87,7 @@ namespace Downloader_Bot
                             }
 
                             //Then check the file size; If it is less than 20MB use telegram itself
-                            long size = GetSizeOfFile(e.Message.Text);
+                            long size = await GetSizeOfFile(e.Message.Text);
                             if (size < 1) //Either an error or file size is really 0
                             {
                                 await _bot.SendTextMessageAsync(e.Message.Chat,
@@ -113,13 +113,13 @@ namespace Downloader_Bot
                                     "Downloading the file on server");
                                 string dir = new Random().Next().ToString();
                                 var d = Directory.CreateDirectory(Path.Combine(_downloadPath, dir));
+                                WebClient wc = new WebClient();
                                 try
                                 {
                                     int percent = 0;
-                                    long toDownload = 1,downloaded = 0,lastTimeDownloaded = 0;
+                                    long toDownload = 1, downloaded = 0, lastTimeDownloaded = 0;
                                     string lastMsg = ""; //Do not edit the message and send exactly the same thing
                                     //At first download the whole file
-                                    WebClient wc = new WebClient();
                                     wc.DownloadProgressChanged += (o, args) =>
                                     {
                                         percent = args.ProgressPercentage;
@@ -127,11 +127,13 @@ namespace Downloader_Bot
                                         downloaded = args.BytesReceived;
                                     };
                                     wc.DownloadFileAsync(new Uri(e.Message.Text),
-                                            Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
+                                        Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
                                     while (wc.IsBusy)
                                     {
                                         string m = percent + "% Completed.\n" + BytesToString(downloaded) + " from " +
-                                                   BytesToString(toDownload) + "  " + BytesToString(downloaded - lastTimeDownloaded) + "/s"; //Do not edit the message and send exactly the same thing
+                                                   BytesToString(toDownload) + "  " +
+                                                   BytesToString(downloaded - lastTimeDownloaded) +
+                                                   "/s"; //Do not edit the message and send exactly the same thing
                                         if (m != lastMsg)
                                         {
                                             lastMsg = m;
@@ -141,7 +143,7 @@ namespace Downloader_Bot
                                             for (int i = 0; i < 10 - percent / 10; i++)
                                                 m += "⠀"; //This is not space
                                             m += "]";
-                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,m);
+                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, m);
                                         }
 
                                         lastTimeDownloaded = downloaded;
@@ -155,6 +157,10 @@ namespace Downloader_Bot
                                         "Error downloading " + e.Message.Text);
                                     await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
                                     return;
+                                }
+                                finally
+                                {
+                                    wc.Dispose();
                                 }
 
                                 if (size < MaxTelegramSize) //Send the file directly
@@ -216,22 +222,25 @@ namespace Downloader_Bot
         /// </summary>
         /// <param name="url">The URL to check</param>
         /// <returns>The size in bytes; -1 if fails</returns>
-        private static long GetSizeOfFile(string url)
+        private static async Task<long> GetSizeOfFile(string url)
         {
+            long res = -1;
+            WebClient wc = new WebClient();
             try
             {
-                using (WebClient wc = new WebClient())
-                {
-                    wc.OpenRead(url);
-                    return Convert.ToInt64(wc.ResponseHeaders["Content-Length"]);
-                }
+                await wc.OpenReadTaskAsync(url);
+                res = Convert.ToInt64(wc.ResponseHeaders["Content-Length"]);
             }
             catch (Exception)
             {
                 // ignored
             }
+            finally
+            {
+                wc.Dispose();
+            }
 
-            return -1;
+            return res;
         }
 
         /// <summary>
