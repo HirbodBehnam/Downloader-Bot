@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ionic.Zip;
 using Telegram.Bot;
+using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.InputFiles;
 
 namespace Downloader_Bot
@@ -25,7 +26,7 @@ namespace Downloader_Bot
     class Program
     {
         private const int MaxFileSize = 1000 * 1000 * 50,MaxTelegramSize = 20 * 1000 * 1000; //For some reasons, looks like there is some problems with 1024 * 1024 * 50 
-        private const string Version = "1.0.1";
+        private const string Version = "1.0.2";
         private static ConfigStruct _config;
         private static TelegramBotClient _bot;
         private static string _downloadPath;
@@ -85,12 +86,12 @@ namespace Downloader_Bot
                                 await _bot.SendTextMessageAsync(e.Message.Chat, "The URL is not valid.");
                                 return;
                             }
-
+                            var msg = await _bot.SendTextMessageAsync(e.Message.Chat, "Getting some info about file...",ParseMode.Default,true,false,e.Message.MessageId);
                             //Then check the file size; If it is less than 20MB use telegram itself
                             long size = await GetSizeOfFile(e.Message.Text);
                             if (size < 1) //Either an error or file size is really 0
                             {
-                                await _bot.SendTextMessageAsync(e.Message.Chat,
+                                await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
                                     "Error on getting file size or the file size is 0");
                                 return;
                             }
@@ -99,8 +100,10 @@ namespace Downloader_Bot
                                 try
                                 {
                                     InputOnlineFile inputOnlineFile = new InputOnlineFile(e.Message.Text);
-                                    await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile);
-                                    break;
+                                    await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile,null,ParseMode.Default,
+                                        false,e.Message.MessageId);
+                                    await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
+                                    break; //If the file is uploaded, do not continue to download it
                                 }
                                 catch (Exception ex)
                                 {
@@ -109,8 +112,6 @@ namespace Downloader_Bot
                             }
                             if (size < _config.MaxFileSize) //Download the file, zip it and send it
                             {
-                                var msg = await _bot.SendTextMessageAsync(e.Message.Chat,
-                                    "Downloading the file on server");
                                 string dir = new Random().Next().ToString();
                                 var d = Directory.CreateDirectory(Path.Combine(_downloadPath, dir));
                                 WebClient wc = new WebClient();
@@ -143,7 +144,7 @@ namespace Downloader_Bot
                                             for (int i = 0; i < 10 - percent / 10; i++)
                                                 m += "⠀"; //This is not space
                                             m += "]";
-                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, m);
+                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, "Downloading file on server:\n" + m);
                                         }
 
                                         lastTimeDownloaded = downloaded;
@@ -153,9 +154,8 @@ namespace Downloader_Bot
                                 catch (Exception ex)
                                 {
                                     Log("Error downloading " + e.Message.Text + ": " + ex.Message);
-                                    await _bot.SendTextMessageAsync(e.Message.Chat,
+                                    await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
                                         "Error downloading " + e.Message.Text);
-                                    await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
                                     return;
                                 }
                                 finally
@@ -169,8 +169,10 @@ namespace Downloader_Bot
                                     {
                                         InputOnlineFile inputOnlineFile =
                                             new InputOnlineFile(fs, Path.GetFileName(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text))));
-                                        await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile);
+                                        await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile,null,ParseMode.Default,
+                                            false,e.Message.MessageId);
                                     }
+                                    await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
                                 }
                                 else
                                 {
@@ -197,7 +199,8 @@ namespace Downloader_Bot
                                         {
                                             InputOnlineFile inputOnlineFile =
                                                 new InputOnlineFile(fs, Path.GetFileName(files[i]));
-                                            await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile);
+                                            await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile,
+                                                null,ParseMode.Default,false,e.Message.MessageId);
                                         }
                                     }
 
@@ -207,7 +210,7 @@ namespace Downloader_Bot
                             }
                             else
                             {
-                                await _bot.SendTextMessageAsync(e.Message.Chat,
+                                await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
                                     "File is too large for bot! (file size is " + size + " bytes)");
                             }
                         }
