@@ -13,8 +13,6 @@ using Telegram.Bot.Types.InputFiles;
 
 namespace Downloader_Bot
 {
-    //dotnet add package DotNetZip --version 1.13.4
-    //dotnet add package Telegram.Bot --version 15.0.0
     internal class ConfigStruct
     {
         public string Token;
@@ -140,9 +138,9 @@ namespace Downloader_Bot
                                             lastMsg = m;
                                             m += "\n[";
                                             for (int i = 0; i < percent / 10; i++)
-                                                m += "#";
+                                                m += "█";
                                             for (int i = 0; i < 10 - percent / 10; i++)
-                                                m += "⠀"; //This is not space
+                                                m += "▁";
                                             m += "]";
                                             await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, "Downloading file on server:\n" + m);
                                         }
