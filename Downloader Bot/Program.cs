@@ -1,5 +1,6 @@
 ﻿using Newtonsoft.Json;
 using System;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -7,9 +8,11 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Ionic.Zip;
+using Ionic.Zlib;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.InputFiles;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Downloader_Bot
 {
@@ -29,6 +32,8 @@ namespace Downloader_Bot
         private static TelegramBotClient _bot;
         private static string _downloadPath;
         private static bool _freeBot;
+        private static ConcurrentDictionary<uint, bool> _downloadList; //0 is running, 1 is canceled, 2 is done
+        private static volatile uint _downloaderCounter;
 
         static void Main(string[] args)
         {
@@ -51,10 +56,13 @@ namespace Downloader_Bot
                 ? Environment.CurrentDirectory
                 : _config.DownloadPath;
             Directory.CreateDirectory(_downloadPath);
+            //Setup the cancel button list
+            _downloadList = new ConcurrentDictionary<uint, bool>();
             //Setup the bot
             _bot = new TelegramBotClient(_config.Token);
             Log("Authorized on bot " + _bot.GetMeAsync().Result.Username);
             _bot.OnMessage += Bot_OnMessage;
+            _bot.OnCallbackQuery += (sender, eventArgs) => _downloadList[uint.Parse(eventArgs.CallbackQuery.Data)] = false;
             _bot.StartReceiving();
             while (true)
                 Thread.Sleep(int.MaxValue);
@@ -95,6 +103,8 @@ namespace Downloader_Bot
                             }
                             if (size < MaxTelegramSize && CheckExtenstion(GetFileNameFromUrl(e.Message.Text)))
                             {
+                                await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
+                                    "Telegram is directly downloading the file...");
                                 try
                                 {
                                     InputOnlineFile inputOnlineFile = new InputOnlineFile(e.Message.Text);
@@ -110,6 +120,16 @@ namespace Downloader_Bot
                             }
                             if (size < _config.MaxFileSize) //Download the file, zip it and send it
                             {
+                                uint cancelTokenId = _downloaderCounter++;
+                                //Create cancel button
+                                var inlineKeyboardCancelBtn = new InlineKeyboardMarkup(new InlineKeyboardButton
+                                {
+                                    Text = "Cancel",
+                                    CallbackData = cancelTokenId.ToString()
+                                });
+                                if (!_downloadList.TryAdd(cancelTokenId, true))
+                                    inlineKeyboardCancelBtn = null;
+                                //Now create directory and file for it
                                 string dir = new Random().Next().ToString();
                                 var d = Directory.CreateDirectory(Path.Combine(_downloadPath, dir));
                                 WebClient wc = new WebClient();
@@ -129,6 +149,13 @@ namespace Downloader_Bot
                                         Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
                                     while (wc.IsBusy)
                                     {
+                                        if (_downloadList.TryGetValue(cancelTokenId, out bool downloading))
+                                            if (!downloading)
+                                            {
+                                                wc.CancelAsync();
+                                                throw new OperationCanceledException();
+                                            }
+
                                         string m = percent + "% Completed.\n" + BytesToString(downloaded) + " from " +
                                                    BytesToString(toDownload) + "  " +
                                                    BytesToString(downloaded - lastTimeDownloaded) +
@@ -142,18 +169,29 @@ namespace Downloader_Bot
                                             for (int i = 0; i < 10 - percent / 10; i++)
                                                 m += "▁";
                                             m += "]";
-                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, "Downloading file on server:\n" + m);
+                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
+                                                "Downloading file on server:\n" + m,ParseMode.Default,true,inlineKeyboardCancelBtn);
                                         }
 
                                         lastTimeDownloaded = downloaded;
                                         await Task.Delay(1000);
                                     }
                                 }
+                                catch (OperationCanceledException)
+                                {
+                                    await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
+                                        "Canceled");
+                                    d.Delete(true);
+                                    _downloadList.TryRemove(cancelTokenId, out _);
+                                    return;
+                                }
                                 catch (Exception ex)
                                 {
                                     Log("Error downloading " + e.Message.Text + ": " + ex.Message);
                                     await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
                                         "Error downloading " + e.Message.Text);
+                                    d.Delete(true);
+                                    _downloadList.TryRemove(cancelTokenId, out _);
                                     return;
                                 }
                                 finally
@@ -178,6 +216,7 @@ namespace Downloader_Bot
                                     await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, "Zipping file");
                                     using (ZipFile zip = new ZipFile())
                                     {
+                                        zip.CompressionLevel = CompressionLevel.Level1;
                                         zip.AddFile(
                                             Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)),
                                             "");
@@ -189,20 +228,55 @@ namespace Downloader_Bot
                                     File.Delete(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
                                     //Send all of the zip files to telegram
                                     var files = Directory.GetFiles(Path.Combine(_downloadPath, dir));
-                                    for (int i = 0; i < files.Length; i++)
+                                    
+                                    using (var cancellationTokenSource = new CancellationTokenSource())
                                     {
-                                        await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
-                                            $"Uploading file {i + 1}/{files.Length}");
-                                        using (FileStream fs = File.OpenRead(files[i]))
+                                        bool done = false;
+                                        var cancelWatch = Task.Run(() =>
                                         {
-                                            InputOnlineFile inputOnlineFile =
-                                                new InputOnlineFile(fs, Path.GetFileName(files[i]));
-                                            await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile,
-                                                null,ParseMode.Default,false,e.Message.MessageId);
-                                        }
-                                    }
+                                            while (true)
+                                            {
+                                                if (_downloadList.TryGetValue(cancelTokenId, out bool downloading))
+                                                    if (!downloading)
+                                                    {
+                                                        cancellationTokenSource.Cancel();
+                                                        break;
+                                                    }
+                                                if (done)
+                                                    break;
 
+                                                Thread.Sleep(100);
+                                            }
+                                            
+                                        });
+                                        for (int i = 0; i < files.Length; i++)
+                                        {
+                                            if (_downloadList.TryGetValue(cancelTokenId, out bool downloading))
+                                                if (!downloading)
+                                                    break;
+                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
+                                                $"Uploading file {i + 1}/{files.Length}",ParseMode.Default,false,inlineKeyboardCancelBtn);
+
+                                            using (FileStream fs = File.OpenRead(files[i]))
+                                            {
+                                                InputOnlineFile inputOnlineFile =
+                                                    new InputOnlineFile(fs, Path.GetFileName(files[i]));
+                                                try
+                                                {
+                                                    await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile,
+                                                        null, ParseMode.Default, false, e.Message.MessageId,
+                                                        null, cancellationTokenSource.Token);
+                                                }catch(TaskCanceledException){
+                                                    await _bot.SendTextMessageAsync(e.Message.Chat, "Canceled",ParseMode.Default,
+                                                        false,false,e.Message.MessageId);
+                                                }
+                                            }
+                                        }
+
+                                        done = true;
+                                    }
                                 }
+                                _downloadList.TryRemove(cancelTokenId, out _);
                                 await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
                                 d.Delete(true);
                             }
