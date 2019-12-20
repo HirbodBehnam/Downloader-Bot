@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Ionic.Zip;
@@ -26,7 +27,11 @@ namespace Downloader_Bot
 
     class Program
     {
-        private const int MaxFileSize = 1000 * 1000 * 50,MaxTelegramSize = 20 * 1000 * 1000; //For some reasons, looks like there is some problems with 1024 * 1024 * 50 
+        private const int
+            MaxFileSize = 1000 * 1000 * 50,
+            MaxTelegramSize =
+                20 * 1000 * 1000; //For some reasons, looks like there is some problems with 1024 * 1024 * 50 
+
         private const string Version = "1.0.2";
         private static ConfigStruct _config;
         private static TelegramBotClient _bot;
@@ -62,7 +67,8 @@ namespace Downloader_Bot
             _bot = new TelegramBotClient(_config.Token);
             Log("Authorized on bot " + _bot.GetMeAsync().Result.Username);
             _bot.OnMessage += Bot_OnMessage;
-            _bot.OnCallbackQuery += (sender, eventArgs) => _downloadList[uint.Parse(eventArgs.CallbackQuery.Data)] = false;
+            _bot.OnCallbackQuery += (sender, eventArgs) =>
+                _downloadList[uint.Parse(eventArgs.CallbackQuery.Data)] = false;
             _bot.StartReceiving();
             while (true)
                 Thread.Sleep(int.MaxValue);
@@ -92,24 +98,28 @@ namespace Downloader_Bot
                                 await _bot.SendTextMessageAsync(e.Message.Chat, "The URL is not valid.");
                                 return;
                             }
-                            var msg = await _bot.SendTextMessageAsync(e.Message.Chat, "Getting some info about file...",ParseMode.Default,true,false,e.Message.MessageId);
+
+                            var msg = await _bot.SendTextMessageAsync(e.Message.Chat, "Getting some info about file...",
+                                ParseMode.Default, true, false, e.Message.MessageId);
                             //Then check the file size; If it is less than 20MB use telegram itself
                             long size = await GetSizeOfFile(e.Message.Text);
                             if (size < 1) //Either an error or file size is really 0
                             {
-                                await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
+                                await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
                                     "Error on getting file size or the file size is 0");
                                 return;
                             }
+
                             if (size < MaxTelegramSize && CheckExtenstion(GetFileNameFromUrl(e.Message.Text)))
                             {
-                                await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
+                                await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
                                     "Telegram is directly downloading the file...");
                                 try
                                 {
                                     InputOnlineFile inputOnlineFile = new InputOnlineFile(e.Message.Text);
-                                    await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile,null,ParseMode.Default,
-                                        false,e.Message.MessageId);
+                                    await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile, null,
+                                        ParseMode.Default,
+                                        false, e.Message.MessageId);
                                     await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
                                     break; //If the file is uploaded, do not continue to download it
                                 }
@@ -118,6 +128,7 @@ namespace Downloader_Bot
                                     Log("Error: Cannot download directly from Telegram:" + ex.Message);
                                 }
                             }
+
                             if (size < _config.MaxFileSize) //Download the file, zip it and send it
                             {
                                 uint cancelTokenId = _downloaderCounter++;
@@ -156,7 +167,7 @@ namespace Downloader_Bot
                                                 throw new OperationCanceledException();
                                             }
 
-                                        string m = percent + "% Completed.\n" + BytesToString(downloaded) + " from " +
+                                        string m = percent + "% Completed\n" + BytesToString(downloaded) + " from " +
                                                    BytesToString(toDownload) + "  " +
                                                    BytesToString(downloaded - lastTimeDownloaded) +
                                                    "/s"; //Do not edit the message and send exactly the same thing
@@ -170,7 +181,8 @@ namespace Downloader_Bot
                                                 m += "▁";
                                             m += "]";
                                             await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
-                                                "Downloading file on server:\n" + m,ParseMode.Default,true,inlineKeyboardCancelBtn);
+                                                "Downloading file on server:\n" + m, ParseMode.Default, true,
+                                                inlineKeyboardCancelBtn);
                                         }
 
                                         lastTimeDownloaded = downloaded;
@@ -179,7 +191,7 @@ namespace Downloader_Bot
                                 }
                                 catch (OperationCanceledException)
                                 {
-                                    await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
+                                    await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
                                         "Canceled");
                                     d.Delete(true);
                                     _downloadList.TryRemove(cancelTokenId, out _);
@@ -188,7 +200,7 @@ namespace Downloader_Bot
                                 catch (Exception ex)
                                 {
                                     Log("Error downloading " + e.Message.Text + ": " + ex.Message);
-                                    await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
+                                    await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
                                         "Error downloading " + e.Message.Text);
                                     d.Delete(true);
                                     _downloadList.TryRemove(cancelTokenId, out _);
@@ -201,14 +213,93 @@ namespace Downloader_Bot
 
                                 if (size < MaxTelegramSize) //Send the file directly
                                 {
-                                    using (FileStream fs = File.OpenRead(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text))))
+                                    await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, "Uploading file");
+                                    using (var cancellationTokenSource = new CancellationTokenSource())
+                                    using (FileStream fs = File.OpenRead(Path.Combine(_downloadPath, dir,
+                                        GetFileNameFromUrl(e.Message.Text))))
+                                    using (var client = new HttpClient())
+                                    using (var multiForm = new MultipartFormDataContent())
                                     {
-                                        InputOnlineFile inputOnlineFile =
-                                            new InputOnlineFile(fs, Path.GetFileName(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text))));
-                                        await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile,null,ParseMode.Default,
-                                            false,e.Message.MessageId);
+                                        bool done = false;
+                                        long toUpload = 1, uploaded = 0, lastTimeUploaded = 0;
+                                        string lastMsg = "";
+                                        //This thread checks cancel status and also reports downloads
+                                        _ = Task.Run(() =>
+                                        {
+                                            while (true)
+                                            {
+                                                if (done)
+                                                    return;
+                                                if (_downloadList.TryGetValue(cancelTokenId, out bool downloading))
+                                                    if (!downloading)
+                                                    {
+                                                        cancellationTokenSource.Cancel();
+                                                        return;
+                                                    }
+
+                                                int percent = (int) ((float) uploaded / toUpload * 100f);
+                                                string m = percent + "% Uploaded\n" + BytesToString(uploaded) +
+                                                           " from " +
+                                                           BytesToString(toUpload) + "  " +
+                                                           BytesToString(uploaded - lastTimeUploaded) +
+                                                           "/s";
+                                                if (m != lastMsg
+                                                ) //Do not edit the message and send exactly the same thing
+                                                {
+                                                    lastMsg = m;
+                                                    m += "\n[";
+                                                    for (int i = 0; i < percent / 10; i++)
+                                                        m += "█";
+                                                    for (int i = 0; i < 10 - percent / 10; i++)
+                                                        m += "▁";
+                                                    m += "]";
+                                                    _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
+                                                        "Uploading file on server:\n" + m, ParseMode.Default, true
+                                                        , inlineKeyboardCancelBtn);
+                                                }
+
+                                                lastTimeUploaded = uploaded;
+                                                Thread.Sleep(1000);
+                                            }
+                                        });
+
+                                        client.Timeout = TimeSpan.FromMilliseconds(-1);
+
+                                        var file = new ProgressableStreamContent(
+                                            new StreamContent(fs), (sent, total) =>
+                                            {
+                                                toUpload = total;
+                                                uploaded = sent;
+                                            });
+
+                                        multiForm.Add(file, "document", fs.Name); // Add the file
+
+                                        multiForm.Add(new StringContent(e.Message.Chat.Id.ToString()),
+                                            "chat_id");
+                                        try
+                                        {
+                                            var response = await client.PostAsync(
+                                                "https://api.telegram.org/bot" + _config.Token + "/sendDocument",
+                                                multiForm, cancellationTokenSource.Token);
+                                            if (response.StatusCode != HttpStatusCode.OK)
+                                            {
+                                                await _bot.SendTextMessageAsync(e.Message.Chat,
+                                                    "Error on uploading file. Canceling operation.", ParseMode.Default,
+                                                    false,
+                                                    false, e.Message.MessageId);
+                                            }
+                                        }
+                                        catch (OperationCanceledException)
+                                        {
+                                            await _bot.SendTextMessageAsync(e.Message.Chat,
+                                                "Canceled", ParseMode.Default, false,
+                                                false, e.Message.MessageId);
+                                        }
+                                        finally
+                                        {
+                                            done = true;
+                                        }
                                     }
-                                    await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
                                 }
                                 else
                                 {
@@ -228,61 +319,112 @@ namespace Downloader_Bot
                                     File.Delete(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
                                     //Send all of the zip files to telegram
                                     var files = Directory.GetFiles(Path.Combine(_downloadPath, dir));
-                                    
                                     using (var cancellationTokenSource = new CancellationTokenSource())
                                     {
-                                        bool done = false;
-                                        var cancelWatch = Task.Run(() =>
-                                        {
-                                            while (true)
-                                            {
-                                                if (_downloadList.TryGetValue(cancelTokenId, out bool downloading))
-                                                    if (!downloading)
-                                                    {
-                                                        cancellationTokenSource.Cancel();
-                                                        break;
-                                                    }
-                                                if (done)
-                                                    break;
-
-                                                Thread.Sleep(100);
-                                            }
-                                            
-                                        });
                                         for (int i = 0; i < files.Length; i++)
                                         {
                                             if (_downloadList.TryGetValue(cancelTokenId, out bool downloading))
                                                 if (!downloading)
                                                     break;
-                                            await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
-                                                $"Uploading file {i + 1}/{files.Length}",ParseMode.Default,false,inlineKeyboardCancelBtn);
 
                                             using (FileStream fs = File.OpenRead(files[i]))
+                                            using (var client = new HttpClient())
+                                            using (var multiForm = new MultipartFormDataContent())
                                             {
-                                                InputOnlineFile inputOnlineFile =
-                                                    new InputOnlineFile(fs, Path.GetFileName(files[i]));
+                                                bool done = false;
+                                                long toUpload = 1, uploaded = 0, lastTimeUploaded = 0;
+                                                string lastMsg = "";
+                                                //This thread checks cancel status and also reports downloads
+                                                _ = Task.Run(() =>
+                                                {
+                                                    while (true)
+                                                    {
+                                                        if (done)
+                                                            return;
+                                                        if (_downloadList.TryGetValue(cancelTokenId,
+                                                            out bool downloading_inner))
+                                                            if (!downloading_inner)
+                                                            {
+                                                                cancellationTokenSource.Cancel();
+                                                                return;
+                                                            }
+
+                                                        int percent = (int) ((float) uploaded / toUpload * 100f);
+                                                        string m = percent + "% Uploaded\n" + BytesToString(uploaded) +
+                                                                   " from " +
+                                                                   BytesToString(toUpload) + "  " +
+                                                                   BytesToString(uploaded - lastTimeUploaded) +
+                                                                   "/s";
+                                                        if (m != lastMsg) //Do not edit the message and send exactly the same thing
+                                                        {
+                                                            lastMsg = m;
+                                                            m += "\n[";
+                                                            for (int j = 0; j < percent / 10; j++)
+                                                                m += "█";
+                                                            for (int j = 0; j < 10 - percent / 10; j++)
+                                                                m += "▁";
+                                                            m += "]";
+                                                            _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
+                                                                "Uploading file on server (Part " + (i + 1) + "/" + files.Length + ") :\n" + m, ParseMode.Default,
+                                                                true
+                                                                , inlineKeyboardCancelBtn);
+                                                        }
+
+                                                        lastTimeUploaded = uploaded;
+                                                        Thread.Sleep(1000);
+                                                    }
+                                                });
+
+                                                client.Timeout = TimeSpan.FromMilliseconds(-1);
+
+                                                var file = new ProgressableStreamContent(
+                                                    new StreamContent(fs), (sent, total) =>
+                                                    {
+                                                        toUpload = total;
+                                                        uploaded = sent;
+                                                    });
+
+                                                multiForm.Add(file, "document", fs.Name); // Add the file
+
+                                                multiForm.Add(new StringContent(e.Message.Chat.Id.ToString()),
+                                                    "chat_id");
                                                 try
                                                 {
-                                                    await _bot.SendDocumentAsync(e.Message.Chat, inputOnlineFile,
-                                                        null, ParseMode.Default, false, e.Message.MessageId,
-                                                        null, cancellationTokenSource.Token);
-                                                }catch(TaskCanceledException){
-                                                    await _bot.SendTextMessageAsync(e.Message.Chat, "Canceled",ParseMode.Default,
-                                                        false,false,e.Message.MessageId);
+                                                    var response = await client.PostAsync(
+                                                        "https://api.telegram.org/bot" + _config.Token +
+                                                        "/sendDocument",
+                                                        multiForm, cancellationTokenSource.Token);
+                                                    if (response.StatusCode != HttpStatusCode.OK)
+                                                    {
+                                                        await _bot.SendTextMessageAsync(e.Message.Chat,
+                                                            "Error on uploading file. Canceling operation.",
+                                                            ParseMode.Default,
+                                                            false,
+                                                            false, e.Message.MessageId);
+                                                    }
+                                                }
+                                                catch (OperationCanceledException)
+                                                {
+                                                    await _bot.SendTextMessageAsync(e.Message.Chat,
+                                                        "Canceled", ParseMode.Default, false,
+                                                        false, e.Message.MessageId);
+                                                }
+                                                finally
+                                                {
+                                                    done = true;
                                                 }
                                             }
                                         }
-
-                                        done = true;
                                     }
                                 }
+
                                 _downloadList.TryRemove(cancelTokenId, out _);
                                 await _bot.DeleteMessageAsync(e.Message.Chat, msg.MessageId);
                                 d.Delete(true);
                             }
                             else
                             {
-                                await _bot.EditMessageTextAsync(e.Message.Chat,msg.MessageId,
+                                await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
                                     "File is too large for bot! (file size is " + size + " bytes)");
                             }
                         }
@@ -349,6 +491,7 @@ namespace Downloader_Bot
             string[] parts2 = parts1[parts1.Length - 1].Split('?');
             return parts2[0];
         }
+
         /// <summary>
         /// Checks if the extenstion of the file is supported by telegram for direct upload
         /// </summary>
@@ -356,9 +499,10 @@ namespace Downloader_Bot
         /// <returns></returns>
         private static bool CheckExtenstion(string name)
         {
-            string[] extensions = {".zip",".pdf",".gif",".mp3",".ogg",".jpg",".png",".mp4"};
+            string[] extensions = {".zip", ".pdf", ".gif", ".mp3", ".ogg", ".jpg", ".png", ".mp4"};
             return extensions.Contains(Path.GetExtension(name));
         }
+
         /// <summary>
         /// Converts byte to human readable amount https://stackoverflow.com/a/4975942/4213397
         /// </summary>
@@ -366,7 +510,7 @@ namespace Downloader_Bot
         /// <returns></returns>
         private static string BytesToString(long byteCount)
         {
-            string[] suf = { "B", "KB", "MB", "GB", "TB", "PB", "EB" }; //Longs run out around EB
+            string[] suf = {"B", "KB", "MB", "GB", "TB", "PB", "EB"}; //Longs run out around EB
             if (byteCount == 0)
                 return "0" + suf[0];
             long bytes = Math.Abs(byteCount);
