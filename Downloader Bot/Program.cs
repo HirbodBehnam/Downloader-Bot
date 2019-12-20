@@ -276,6 +276,9 @@ namespace Downloader_Bot
 
                                         multiForm.Add(new StringContent(e.Message.Chat.Id.ToString()),
                                             "chat_id");
+                                        multiForm.Add(new StringContent(e.Message.MessageId.ToString()),
+                                            "reply_to_message_id");
+
                                         try
                                         {
                                             var response = await client.PostAsync(
@@ -388,6 +391,9 @@ namespace Downloader_Bot
 
                                                 multiForm.Add(new StringContent(e.Message.Chat.Id.ToString()),
                                                     "chat_id");
+                                                multiForm.Add(new StringContent(e.Message.MessageId.ToString()),
+                                                    "reply_to_message_id");
+
                                                 try
                                                 {
                                                     var response = await client.PostAsync(
