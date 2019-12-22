@@ -1,6 +1,7 @@
 ﻿using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -37,7 +38,7 @@ namespace Downloader_Bot
         private static TelegramBotClient _bot;
         private static string _downloadPath;
         private static bool _freeBot;
-        private static ConcurrentDictionary<uint, bool> _downloadList; //0 is running, 1 is canceled, 2 is done
+        private static ConcurrentDictionary<uint, bool> _downloadList; // True is downloading, false is canceled
         private static volatile uint _downloaderCounter;
 
         static void Main(string[] args)
@@ -243,8 +244,7 @@ namespace Downloader_Bot
                                                            BytesToString(toUpload) + "  " +
                                                            BytesToString(uploaded - lastTimeUploaded) +
                                                            "/s";
-                                                if (m != lastMsg
-                                                ) //Do not edit the message and send exactly the same thing
+                                                if (m != lastMsg) //Do not edit the message and send exactly the same thing
                                                 {
                                                     lastMsg = m;
                                                     m += "\n[";
@@ -306,22 +306,62 @@ namespace Downloader_Bot
                                 }
                                 else
                                 {
-                                    //Then zip the file
                                     await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId, "Zipping file");
-                                    using (ZipFile zip = new ZipFile())
-                                    {
-                                        zip.CompressionLevel = CompressionLevel.Level1;
-                                        zip.AddFile(
-                                            Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)),
-                                            "");
-                                        zip.MaxOutputSegmentSize = MaxFileSize;
-                                        zip.Save(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)) +
-                                                 ".zip");
+                                    { // Then zip the file
+                                        string lastMsg = "";
+                                        bool zipDone = false;
+                                        long totalBytes = 1, savedBytes = 0;
+                                        _ = Task.Run(() =>
+                                        {
+                                            using (ZipFile zip = new ZipFile())
+                                            {
+                                                zip.CompressionLevel = CompressionLevel.Level1;
+                                                zip.AddFile(
+                                                    Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)),
+                                                    "");
+                                                zip.SaveProgress += (o, arg) =>
+                                                {
+                                                    totalBytes = arg.TotalBytesToTransfer;
+                                                    savedBytes = arg.BytesTransferred;
+                                                };
+                                                zip.MaxOutputSegmentSize = MaxFileSize;
+                                                zip.Save(Path.Combine(_downloadPath, dir,
+                                                             GetFileNameFromUrl(e.Message.Text)) +
+                                                         ".zip");
+                                            }
+
+                                            zipDone = true;
+                                        });
+                                        while(true){
+                                            await Task.Delay(1000); //This time at first wait for zip to collect data
+                                            if(zipDone)
+                                                break;
+                                            if (totalBytes != 0)
+                                            {
+                                                int percent =(int)((float) savedBytes / totalBytes * 100f);
+                                                string m = percent + "% Zipped\n" + BytesToString(savedBytes) +
+                                                           " from " +
+                                                           BytesToString(totalBytes);
+                                                if (m != lastMsg) //Do not edit the message and send exactly the same thing
+                                                {
+                                                    lastMsg = m;
+                                                    m += "\n[";
+                                                    for (int i = 0; i < percent / 10; i++)
+                                                        m += "█";
+                                                    for (int i = 0; i < 10 - percent / 10; i++)
+                                                        m += "▁";
+                                                    m += "]";
+                                                    await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
+                                                        "Zipping file:\n" + m);
+                                                }
+                                            }
+                                        }
                                     }
 
                                     File.Delete(Path.Combine(_downloadPath, dir, GetFileNameFromUrl(e.Message.Text)));
                                     //Send all of the zip files to telegram
                                     var files = Directory.GetFiles(Path.Combine(_downloadPath, dir));
+                                    bool[] doneUpload = new bool[files.Length]; //This variable controls the progress publishing stuff for each file
                                     using (var cancellationTokenSource = new CancellationTokenSource())
                                     {
                                         for (int i = 0; i < files.Length; i++)
@@ -334,19 +374,19 @@ namespace Downloader_Bot
                                             using (var client = new HttpClient())
                                             using (var multiForm = new MultipartFormDataContent())
                                             {
-                                                bool done = false;
                                                 long toUpload = 1, uploaded = 0, lastTimeUploaded = 0;
                                                 string lastMsg = "";
                                                 //This thread checks cancel status and also reports downloads
                                                 _ = Task.Run(() =>
                                                 {
+                                                    int innerI = i;
                                                     while (true)
                                                     {
-                                                        if (done)
+                                                        if (doneUpload[innerI])
                                                             return;
                                                         if (_downloadList.TryGetValue(cancelTokenId,
-                                                            out bool downloading_inner))
-                                                            if (!downloading_inner)
+                                                            out bool downloadingInner))
+                                                            if (!downloadingInner)
                                                             {
                                                                 cancellationTokenSource.Cancel();
                                                                 return;
@@ -368,7 +408,7 @@ namespace Downloader_Bot
                                                                 m += "▁";
                                                             m += "]";
                                                             _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
-                                                                "Uploading file on server (Part " + (i + 1) + "/" + files.Length + ") :\n" + m, ParseMode.Default,
+                                                                "Uploading file on server (Part " + (innerI + 1) + "/" + files.Length + ") :\n" + m, ParseMode.Default,
                                                                 true
                                                                 , inlineKeyboardCancelBtn);
                                                         }
@@ -417,7 +457,7 @@ namespace Downloader_Bot
                                                 }
                                                 finally
                                                 {
-                                                    done = true;
+                                                    doneUpload[i] = true;
                                                 }
                                             }
                                         }
