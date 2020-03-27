@@ -33,7 +33,7 @@ namespace Downloader_Bot
             MaxTelegramSize =
                 20 * 1000 * 1000; //For some reasons, looks like there is some problems with 1024 * 1024 * 50 
 
-        private const string Version = "1.1.0";
+        private const string Version = "1.1.1";
         private static ConfigStruct _config;
         private static TelegramBotClient _bot;
         private static string _downloadPath;
