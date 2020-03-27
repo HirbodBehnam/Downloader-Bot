@@ -192,6 +192,7 @@ namespace Downloader_Bot
                                 }
                                 catch (OperationCanceledException)
                                 {
+                                    wc.Dispose();
                                     await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
                                         "Canceled");
                                     d.Delete(true);
@@ -200,6 +201,7 @@ namespace Downloader_Bot
                                 }
                                 catch (Exception ex)
                                 {
+                                    wc.Dispose();
                                     Log("Error downloading " + e.Message.Text + ": " + ex.Message);
                                     await _bot.EditMessageTextAsync(e.Message.Chat, msg.MessageId,
                                         "Error downloading " + e.Message.Text);
@@ -207,10 +209,7 @@ namespace Downloader_Bot
                                     _downloadList.TryRemove(cancelTokenId, out _);
                                     return;
                                 }
-                                finally
-                                {
-                                    wc.Dispose();
-                                }
+                                wc.Dispose();
 
                                 if (size < MaxTelegramSize) //Send the file directly
                                 {
