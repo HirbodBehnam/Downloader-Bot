@@ -14,9 +14,9 @@ namespace Downloader_Bot
         /// </summary>
         private const int defaultBufferSize = 5 * 4096;
 
-        private HttpContent content;
+        private readonly HttpContent content;
 
-        private int bufferSize;
+        private readonly int bufferSize;
 
         //private bool contentConsumed;
         private Action<long, long> progress;
@@ -28,17 +28,12 @@ namespace Downloader_Bot
 
         public ProgressableStreamContent(HttpContent content, int bufferSize, Action<long, long> progress)
         {
-            if (content == null)
-            {
-                throw new ArgumentNullException("content");
-            }
-
             if (bufferSize <= 0)
             {
-                throw new ArgumentOutOfRangeException("bufferSize");
+                throw new ArgumentOutOfRangeException(nameof(bufferSize));
             }
 
-            this.content = content;
+            this.content = content ?? throw new ArgumentNullException(nameof(content));
             this.bufferSize = bufferSize;
             this.progress = progress;
 
@@ -52,9 +47,8 @@ namespace Downloader_Bot
         {
             return Task.Run(async () =>
             {
-                var buffer = new Byte[this.bufferSize];
-                long size;
-                TryComputeLength(out size);
+                var buffer = new byte[bufferSize];
+                TryComputeLength(out long size);
                 var uploaded = 0;
 
 
