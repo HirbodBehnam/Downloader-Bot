@@ -19,9 +19,9 @@ jobs:
       with:
         dotnet-version: 6.0.x
     - name: Publish
-      run: dotnet publish -r ${{ matrix.targetos }} --self-contained -c Release -o out/
+      run: dotnet publish -r ${{ matrix.targetos }} --self-contained -c Release -o DownloaderBot/
     - name: Compress
-      run: tar cfJ DownloaderBot-${{ matrix.targetos }}.tar.gz out/*
+      run: tar cfJ DownloaderBot-${{ matrix.targetos }}.tar.gz DownloaderBot/*
     - name: Upload
       uses: JasonEtco/upload-to-release@master
       env:
