@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  release:
+    types: [ created ]
+
+jobs:
+  releases-matrix:
+    name: Release .NET
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        targetos: [ win-x64, linux-x64, osx-x64 ]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 6.0.x
+    - name: Publish
+      run: dotnet publish -r ${{ matrix.targetos }} --self-contained -c Release -o out/
+    - name: Compress
+      run: tar cfJ DownloaderBot-${{ matrix.targetos }}.tar.gz out/*
+    - name: Upload
+      uses: JasonEtco/upload-to-release@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        args: DownloaderBot-${{ matrix.targetos }}.tar.gz application/gzip

@@ -38,7 +38,7 @@ class Program
 	private static ConfigStruct _config;
 	private static string _downloadPath;
 	private static bool _freeBot;
-	private static ConcurrentDictionary<Guid, CancellationTokenSource> _downloadList; // True is downloading, false is canceled
+	private static ConcurrentDictionary<Guid, CancellationTokenSource> _downloadList;
 	private static readonly Random rng = new();
 
 	static async Task Main(string[] args)

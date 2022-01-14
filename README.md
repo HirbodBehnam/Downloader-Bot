@@ -3,7 +3,7 @@ A bot to download files from internet and send them though Telegram
 
 Send the bot the link that want to be downloaded. The bot send you the file.
 ## Building
-Build with .Net Core 2.2. After building, copy [config.json](https://raw.githubusercontent.com/HirbodBehnam/Downloader-Bot/master/config_sample.json) file to the output directory.
+Build with .Net 6. After building, copy [config.json](https://raw.githubusercontent.com/HirbodBehnam/Downloader-Bot/master/config_sample.json) file to the output directory.
 
 ### Config File
 There are 4 values you can edit at config.json
